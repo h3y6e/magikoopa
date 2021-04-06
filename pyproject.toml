@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "magikoopa"
+version = "0.1.0"
+description = ""
+authors = ["heyhoe <hash.a5ebec@gmail.com>"]
+
+[tool.poetry.dependencies]
+python = "3.8.5"
+SudachiPy = "^0.5.2"
+SudachiDict-core = "^20201223.post1"
+markovify = "^0.9.0"
+
+[tool.poetry.dev-dependencies]
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
