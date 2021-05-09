@@ -1,93 +1,65 @@
 module Magikoopa
 
-using DataFrames
-using CSV
-using DotEnv
-using Twitter
-using ProgressMeter
-using Statistics
-using StatsPlots
+# imports
+import HTTP
+import JSON
 
-export get_followers_df, save_csv
+# usings
+using Base64
+using Dates
+using MbedTLS
+using PyCall
+using Random
 
-DotEnv.config()
-twitterauth(
-  ENV["API_KEY"],
-  ENV["API_SECRET_KEY"],
-  ENV["ACCESS_TOKEN"],
-  ENV["ACCESS_TOKEN_SECRET"],
-)
+# includes
+include("divide.jl")
+include("generate.jl")
+include("gather.jl")
+include("post.jl")
 
-function get_all_followers_ids(screen_name)
-  cursor = -1
-  followers_ids = []
-  while true
-    followers = get_followers_ids(screen_name = screen_name, cursor = cursor)
-    append!(followers_ids, followers["ids"])
-    if followers["next_cursor"] == 0
-      break
-    else
-      cursor = followers["next_cursor"]
+"""
+    updatemodel(starttime::DateTime)
+
+Update models.
+"""
+function updatemodel(starttime::DateTime)
+    tweetfile = exporttweet(starttime)
+    corpusfile = readdir("data/corpora", join = true)[end]
+    open(corpusfile, "r+") do io
+        tweetjson = JSON.parsefile(tweetfile)
+        tweet = join(values(tweetjson), "\n") |> preprocess |> divide
+        write(io, tweet)
+        modelfile = readdir("data/models", join = true)[end]
+        generate(corpusfile, modelfile)
     end
-  end
-  return followers_ids
+    open(tweetfile, "r") do io
+        if countlines(io) > 10000
+            i = match(r"\d+", tweetfile).match
+            index = string(parse(Int, i) + 1)
+            touch(joinpath("data/tweets", index * ".json"))
+            touch(joinpath("data/corpora", index * ".txt"))
+            touch(joinpath("data/models", index * ".json"))
+        end
+    end
 end
 
-function get_followers_df(target_followers_ids)
-  target_followers_count = length(target_followers_ids)
-  df = DataFrame(
-    ScreenName = [],
-    FollowersCount = [],
-    FriendsCount = [],
-    Ratio = [],
-    Influence = [],
-  )
-  for idx = 1:target_followers_count÷100+min(target_followers_count % 100, 1)
-    user_ids_str = join(
-      target_followers_ids[100*(idx-1)+1:min(
-        100 * idx,
-        target_followers_count,
-      )],
-      ",",
-    )
-    users_lookup = get_users_lookup(user_id = user_ids_str)
-    users_lookup_count = length(users_lookup)
-    screen_name = [users_lookup[i].screen_name for i = 1:users_lookup_count]
-    followers_count =
-      [users_lookup[i].followers_count for i = 1:users_lookup_count]
-    friends_count = [users_lookup[i].friends_count for i = 1:users_lookup_count]
-    append!(df.ScreenName, screen_name)
-    append!(df.FollowersCount, followers_count)
-    append!(df.FriendsCount, friends_count)
-    append!(df.Ratio, followers_count ./ friends_count)
-    append!(df.Influence, followers_count .^ 2 ./ friends_count)
-    sleep(1)
-  end
-  sort!(df, [:Influence], rev = true)
-  return df
+"""
+    Magikoopa.run()
+
+Add tweets from the previous day's midnight to Markov chain model and generate a sentence of 140 characters or less.
+Then, tweet the generated text. Return this text.
+
+# Examples
+```julia-repl
+julia> Magikoopa.run()
+"TL見ながらなかなかエンジンのかからない車みたいに笑ってしまったので今月は生き延びれそう"
+```
+and tweet the sentence as shown in [this tweet](https://twitter.com/5ebec/status/1379450178915037186)
+"""
+function run()
+    yesterday = DateTime(Date(now())) - Day(1)
+    updatemodel(yesterday)
+    return post(makesentence())
 end
 
-function save_csv(target_screen_name)
-  df = get_followers_df(target_screen_name)
-  CSV.write("$target_screen_name.csv", df)
-end
-
-
-
-end
-
-function get_engagement(target_screen_name; count = 200, coef = 2)
-  target_timeline = get_user_timeline(
-    screen_name = target_screen_name,
-    count = count,
-    trim_user = true,
-    exclude_replies = true,
-    include_rts = false,
-  )
-  return mean([
-    coef * target_timeline[i].retweet_count + target_timeline[i].favorite_count
-    for i = 1:length(target_timeline)
-  ])
-end
-
-get_engagement("5ebec")
+end # module
